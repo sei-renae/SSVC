@@ -88,16 +88,16 @@ function reset_form() {
     $('select').prop('selectedIndex',0);
     $('input[type="file"]').hide();
 }
-function select_add_option(s,opt) {
+function select_add_option(s, opt, txt) {
     var q = s.find('option').toArray().findIndex(function(x) {
 	if(x.value == opt) {
 	    x.selected = true;
 	    return true; }
     });
     if(q < 0) {
-	s.append($('<option/>').
-		 attr({value: opt,selected: true})
-		 .html(opt));
+	s.append($('<option/>')
+		 .attr({value: opt,selected: true})
+		 .text(txt || opt));
     };
 }
 function arrayReduce(arr,n) {
@@ -515,11 +515,10 @@ function readFile(input) {
 	//console.log(reader.result);
 	try {
 	    if(input.id == "dtreecsvload") {
-		select_add_option($('#tree_samples'),file.name);
 		if(file.name.match(/\.json$/i))
 		    parse_json(reader.result)
 		else
-		    parse_file(reader.result)
+		    parse_file(reader.result, file.name);
 	    }
 	    else
 		tsv_load(reader.result)
@@ -1442,93 +1441,121 @@ function create_export_schema_dtable(yi,x) {
 	a[x[c]] = b
 	return a; },{}))
 }
-function parse_file(xraw) {
-    /* This is really parse csv instead of parse JSON */
-    //var xraw = 'TSV data'
-    var zraw=[]
-    export_schema.decision_points =  []
-    export_schema.decisions_table =  []
-    /* CSV or TSV looks like 
-       ID,Exploitation,Utility,TechnicalImpact,SafetyImpact,Outcome
-    */
-    var xarray = xraw.split('\n');
-    var xr = xarray.map(function(x) {
-	if((x.indexOf('","') > -1) && (x[0] == '"') && (x.at(-1) == '"')){
-	    x = x.substr(1, x.length-2)
-	    return x.split('","');
-	}
-	return x.split(/[\t,]+/);
+function uniquePrefix(str, used) {
+    let key = str[0];
+    let j = 2;
+    while (used[key]) {
+        key = str.substr(0, j);
+        j++;
+    }
+    used[key] = str;
+    return key;
+}
+function parse_file(xraw, filename) {
+    if (!filename) filename = "file";
+
+    const namespace = "x_example.test#importedfile";
+    const version = "1.0.0";
+    const schemaVersion = "2.0.0";
+
+    const imported = {
+        displayname: "Imported: " + filename,
+        data: {
+            namespace: namespace,
+            decision_points: {},
+            mapping: [],
+            name: "Imported file " + filename,
+            key: "IMP_1",
+            definition: "Imported file " + filename,
+            version: version,
+            schemaVersion: schemaVersion
+        }
+    };
+
+    const xarray = xraw.split("\n").filter(Boolean);
+    const xr = xarray.map(x => {
+        if (x.indexOf('","') > -1 && x[0] === '"' && x.at(-1) === '"') {
+            x = x.substr(1, x.length - 2);
+            return x.split('","');
+        }
+        return x.split(/[\t,]+/);
     });
-    /* Remove first row has the headers and pass the rest to variable y */
-    var y = xr.splice(1)
-    /* Check if rowID first column of second row to match not number*/
-    var is_ssvc_v1 = y[0][0].match(/\D+/) ? false : true
-    /* Remove ID column in the first row to create x*/
-    if (is_ssvc_v1) 
-	var x = xr[0].splice(1)
-    else
-	var x = xr[0]
-    /* Now xr looks like below for ssvc csv v1 */
-    /* [["Row", "Exploitation", "Virulence", "Technical", "Mission_Well-being", "Decision"]] */
-    //var yraw = [[],[],[],[],[]]
-    /* Register the export schema decision points, assume all decisions are simple */
-    export_schema.decision_points = x.map(
-	dc => {
-	    var ix = {decision_type:"simple", options:[]}
-	    ix.label =  dc
-	    return ix
-	})
-    /* make the last column final decision/outcome/action */
-    export_schema.decision_points[export_schema.decision_points.length-1].decision_type="final"
-    /* Initialize Empty arrray */
-    var yraw = [...Array(x.length)].map(u => []);
-    var id=1;
-    /* This will create just the last branches of the tree */
-    var thash = {}
-    for(var i=0; i< y.length - 1; i++) {
-	if(y[i].length < 1) continue
-	/* Remove ID column if it is SSVC v1*/
-	if(is_ssvc_v1)
-	    y[i].shift()
-	/* Add lame CSV/TSV data to export schema */
-	//console.log(y[i]);
-	create_export_schema_dtable(y[i],x)
-	var tname = y[i].pop()+":"+y[i].join(":")
-	//console.log(tname)
-	if(tname == "undefined") continue;
-	for( var j=0; j< x.length-1; j++) {
-	    /*y[i] look like 0,none,laborious,partial,none,defer */
-	    var tparent = x[x.length-2-j]+":"+y[i].slice(0,x.length-2-j).join(":")
-	    //console.log(tparent)
-	    if(!(tname in thash))
-		var yt = {name:tname.replace(/\:+$/,''),id:id++,parent:tparent.replace(/\:+$/,''),props:"{}",children:[]}
-	    else
-		continue
-	    thash[yt.name] = 1
-	    tname = tparent
-	    yraw[j].push(yt)
-	}
+
+    const headers = xr[0];
+    const rows = xr.slice(1);
+
+    let detect_version = "CSVv1"
+    if (rows.every(row => !isNaN(row[0]))) {
+	headers.shift();
+	rows.forEach(row => row.shift());
+	detect_version = "CSVv2";
     }
-    /* This step below is not necessary now as the above routine goes from 
-       0 -> y.length, instead  of 0 to y.length -1. 
-       Remove ID column and Add the last row into export schema */
-    //y[y.length-1].shift()
-    //create_export_schema(y[y.length-1],x)
-    for(var j=yraw.length; j> -1; j--)  {
-	if(yraw.length > 0)
-	    zraw = zraw.concat(yraw[j])
-    }
-    /* Next part of the tree data  */
-    zraw[0] = {name:x[0],id:id+254,children:[],parent:null,props:"{}"}
-    /* yraw[0].push({name:"Exploitation:",id:1024,children:[],parent:null,props:"{}"}) */
-    raw = zraw
-    var detect_version = "v2"
-    if(is_ssvc_v1)
-	detect_version = "v1"
-    topalert("Decision tree has been updated with "+raw.length+" nodes, with "+
-	     y.length+" possible decisions using "+detect_version+" CSV/TSV file, You can use it now!","success")
-    dt_clear();
-    parse_json(export_schema);
+
+    // ---- header key map (short + unique) ----
+    const headermap = {};
+    const headerKeys = headers.map(h => uniquePrefix(h, headermap));
+
+    // ---- create decision points once ----
+    headerKeys.forEach((hkey, i) => {
+        const dpkey = namespace + ":" + hkey + ":" + version;
+        imported.data.decision_points[dpkey] = {
+            key: dpkey,
+            version: version,
+            namespace: namespace,
+	    name: headers[i],
+            schemaVersion: schemaVersion,
+            definition: headers[i], // full header name
+            values: []              // value objects
+        };
+
+        if (i === headerKeys.length - 1) {
+            imported.data.outcome = dpkey;
+        }
+    });
+
+    // ---- per-column value maps ----
+    const valuemap = Array.from({ length: headers.length }, () => ({}));
+
+    rows.forEach(row => {
+        const rowMapping = {};
+
+        row.forEach((value, i) => {
+            const dpkey = namespace + ":" + headerKeys[i] + ":" + version;
+            const seen = valuemap[i];
+
+            // incremental prefix key for value
+            let key = value[0];
+            let j = 2;
+            while (seen[key] && seen[key] !== value) {
+                key = value.substr(0, j);
+                j++;
+            }
+
+            // add new value to decision_point if needed
+            if (!(key in seen)) {
+                imported.data.decision_points[dpkey].values.push({
+                    key,               // incremental prefix
+                    name: value,       // display name
+                    definition: value // textual description for SSVC schema
+                });
+                seen[key] = value;
+            }
+
+            // add mapping for this row
+            rowMapping[dpkey] = key;
+        });
+
+        imported.data.mapping.push(rowMapping);
+    });
+    topalert("Decision tree has been updated with "+
+	     imported.data.mapping.length+" possible decisions using "+detect_version+" CSV/TSV file, You can use it now!","success");
+    console.log(imported);
+    parse_json(imported.data);
+    //select_add_option($('#tree_samples'),file.name);
+    SSVC.decision_trees.push(imported);
+    select_add_option($('#tree_samples'), String(SSVC.decision_trees.length - 1), "Imported: " + filename );
+
+    return imported;
 }
 
 function add_invalid_feedback(xel,msg) {
