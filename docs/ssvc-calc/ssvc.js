@@ -1451,8 +1451,14 @@ function parse_file(xraw) {
     /* CSV or TSV looks like 
        ID,Exploitation,Utility,TechnicalImpact,SafetyImpact,Outcome
     */
-    var xarray = xraw.split('\n')
-    var xr = xarray.map(x => x.split(/[\t,]+/))
+    var xarray = xraw.split('\n');
+    var xr = xarray.map(function(x) {
+	if((x.indexOf('","') > -1) && (x[0] == '"') && (x.at(-1) == '"')){
+	    x = x.substr(1, x.length-2)
+	    return x.split('","');
+	}
+	return x.split(/[\t,]+/);
+    });
     /* Remove first row has the headers and pass the rest to variable y */
     var y = xr.splice(1)
     /* Check if rowID first column of second row to match not number*/
@@ -1522,8 +1528,7 @@ function parse_file(xraw) {
     topalert("Decision tree has been updated with "+raw.length+" nodes, with "+
 	     y.length+" possible decisions using "+detect_version+" CSV/TSV file, You can use it now!","success")
     dt_clear();
-    export_schema.decision_points[export_schema.decision_points.length-1].
-	options.map((x,i) => lcolors[x.label] = ocolors[i] )
+    parse_json(export_schema);
 }
 
 function add_invalid_feedback(xel,msg) {
